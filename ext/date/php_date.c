@@ -637,6 +637,7 @@ static HashTable *date_object_get_gc(zval *object, zval ***table, int *n TSRMLS_
 static HashTable *date_object_get_properties(zval *object TSRMLS_DC);
 static HashTable *date_object_get_gc_interval(zval *object, zval ***table, int *n TSRMLS_DC);
 static HashTable *date_object_get_properties_interval(zval *object TSRMLS_DC);
+static int date_object_has_property_interval(zval *object, zval *member, int has_set_exists, const struct _zend_literal *key TSRMLS_DC);
 static HashTable *date_object_get_gc_period(zval *object, zval ***table, int *n TSRMLS_DC);
 static HashTable *date_object_get_properties_period(zval *object TSRMLS_DC);
 static HashTable *date_object_get_properties_timezone(zval *object TSRMLS_DC);
@@ -2025,7 +2026,7 @@ static void date_register_classes(TSRMLS_D)
 	date_object_handlers_date.clone_obj = date_object_clone_date;
 	date_object_handlers_date.compare_objects = date_object_compare_date;
 	date_object_handlers_date.get_properties = date_object_get_properties;
-	date_object_handlers_date.get_gc = date_object_get_gc;
+     	date_object_handlers_date.get_gc = date_object_get_gc;
 	zend_class_implements(date_ce_date TSRMLS_CC, 1, date_ce_interface);
 
 #define REGISTER_DATE_CLASS_CONST_STRING(const_name, value) \
@@ -2086,6 +2087,7 @@ static void date_register_classes(TSRMLS_D)
 	date_object_handlers_interval.read_property = date_interval_read_property;
 	date_object_handlers_interval.write_property = date_interval_write_property;
 	date_object_handlers_interval.get_properties = date_object_get_properties_interval;
+	date_object_handlers_interval.has_property = date_object_has_property_interval;
 	date_object_handlers_interval.get_property_ptr_ptr = NULL;
 	date_object_handlers_interval.get_gc = date_object_get_gc_interval;
 
@@ -2444,6 +2446,63 @@ static HashTable *date_object_get_properties_interval(zval *object TSRMLS_DC)
 	PHP_DATE_INTERVAL_ADD_PROPERTY("have_special_relative", have_special_relative);
 
 	return props;
+}
+
+static int date_object_has_property_interval(zval *object, zval *member, int has_set_exists, const struct _zend_literal *key TSRMLS_DC)
+{
+	zval tmp_member;
+	php_interval_obj *intervalobj;
+	HashTable *props;
+	zval *prop_val;
+	zend_object_handlers *std_hnd;
+	int ret, retval = 0;
+			
+	if (Z_TYPE_P(member) != IS_STRING) {
+		tmp_member = *member;
+		zval_copy_ctor(&tmp_member);
+		convert_to_string(&tmp_member);
+		member = &tmp_member;
+	}
+	
+	ret = FAILURE;
+	intervalobj = (php_interval_obj *) zend_objects_get_address(object TSRMLS_CC);
+	
+	if (!intervalobj->props) {
+		props = date_object_get_properties_interval(object TSRMLS_CC);
+	}
+	
+	if (props != NULL) {
+		if (key) {
+			ret = zend_hash_quick_find(props, Z_STRVAL_P(member), Z_STRLEN_P(member)+1, key->hash_value, (void **) &prop_val);
+		} else {
+			ret = zend_hash_find(props, Z_STRVAL_P(member), Z_STRLEN_P(member)+1, (void **) &prop_val);
+		}
+	}
+
+	if (ret == SUCCESS) {
+        	zval *tmp = NULL;
+        	
+        	if (has_set_exists == 2) {
+        		retval = 1;
+        	} else {
+        		tmp = date_interval_read_property(object, member, has_set_exists, key TSRMLS_CC);
+        		if ((has_set_exists == 0 && Z_TYPE_P(tmp) == IS_NULL) || (has_set_exists == 1 && zval_is_true(tmp))) {
+        			retval = 1;
+        		}
+        	}
+        	
+        	if (tmp) {
+        		zval_ptr_dtor(&tmp);
+        	}
+	} else {
+		std_hnd = zend_get_std_object_handlers();
+		retval = std_hnd->has_property(object, member, has_set_exists, key TSRMLS_CC);
+	}
+	
+	if (member == &tmp_member) {
+		zval_dtor(member);
+	}
+	return retval;
 }
 
 static inline zend_object_value date_object_new_period_ex(zend_class_entry *class_type, php_period_obj **ptr TSRMLS_DC)
